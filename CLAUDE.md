@@ -33,11 +33,3 @@ Native runtime. Fase-1 = QB64-PE-fork (vanaf v0.3.0-Chen) + dialect-flag.
 | Patches | `patches/` |
 | Build-config | `CMakeLists.txt` |
 
-## CI-status
-
-`.github/_workflows_pending/ci.yml` ligt klaar maar is nog niet actief op GitHub. Reden: bij eerste push had `gh` OAuth-token de `workflow` scope niet. Activeren met:
-```bash
-gh auth refresh -s workflow
-mv .github/_workflows_pending .github/workflows
-git add -A && git commit -m "Activate CI workflow" && git push
-```
