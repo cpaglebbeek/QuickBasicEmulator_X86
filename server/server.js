@@ -1,10 +1,15 @@
-// qbe-runner — v1.0.0-Kemeny F1 backend skeleton
+// qbe-runner — v1.0.0-Kemeny F4 production
 //
-// Endpoint: POST /api/compile  (multipart/form-data, field "source" = .bas file)
-// Spawns a Docker container with QB64-PE, compiles the BAS, returns the result.
+// Endpoints:
+//   GET  /api/health             — status + active-session-count
+//   POST /api/compile            — multipart .bas → compile in sandbox
+//   POST /api/run/<sessionId>    — start runtime container with Xvfb + x11vnc
+//   POST /api/stop/<sessionId>   — kill runtime container
 //
-// v0.5.0-Hopper (this file) is the first iteration: accepts upload, runs docker,
-// returns stdout/stderr + exit code. No GUI / Xvfb / noVNC yet — that's F2.
+// F4 additions:
+//   - Per-IP rate-limiting (20 compiles/uur)
+//   - Extended source-validation (SHELL/KILL/POKE/OUT + SYSTEM/CHAIN/FILES/RUN)
+//   - Active-session-count in health-endpoint
 
 import http from 'node:http';
 import { spawn } from 'node:child_process';
@@ -25,7 +30,24 @@ const MAX_SOURCE_BYTES = 1_048_576; // 1 MiB
 const DOCKER_IMAGE = process.env.QBE_RUNNER_IMAGE ?? 'qbe-compiler:latest';
 const DOCKER_TIMEOUT_S = 90;
 
-const DANGEROUS_KEYWORDS_RE = /\b(SHELL|KILL|POKE|OUT)\b/i;
+// F4: extended dangerous-keywords list (was: SHELL|KILL|POKE|OUT)
+const DANGEROUS_KEYWORDS_RE = /\b(SHELL|KILL|POKE|OUT|SYSTEM|CHAIN|FILES|RUN\s+["']|_OS|_OPENCLIENT|_CONNECT|_HTTPS)\b/i;
+
+// F4: per-IP rate-limit (20 compiles per uur)
+const RATE_LIMIT_PER_HOUR = 20;
+const RATE_WINDOW_MS = 3_600_000;
+const rateBuckets = new Map(); // ip -> [timestamps]
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const bucket = (rateBuckets.get(ip) ?? []).filter((t) => t > now - RATE_WINDOW_MS);
+  if (bucket.length >= RATE_LIMIT_PER_HOUR) {
+    return { allowed: false, retryAfterS: Math.ceil((bucket[0] + RATE_WINDOW_MS - now) / 1000) };
+  }
+  bucket.push(now);
+  rateBuckets.set(ip, bucket);
+  return { allowed: true, remaining: RATE_LIMIT_PER_HOUR - bucket.length };
+}
 
 function json(res, status, body) {
   res.writeHead(status, { 'content-type': 'application/json' });
@@ -38,6 +60,13 @@ function logEvent(ev) {
 }
 
 async function handleCompile(req, res) {
+  // F4: rate-limit per IP (honor X-Forwarded-For from nginx proxy)
+  const ip = (req.headers['x-forwarded-for']?.split(',')[0].trim()) || req.socket.remoteAddress || 'unknown';
+  const limit = checkRateLimit(ip);
+  if (!limit.allowed) {
+    res.setHeader('Retry-After', String(limit.retryAfterS));
+    return json(res, 429, { error: 'rate limit exceeded', retryAfterS: limit.retryAfterS, limit: RATE_LIMIT_PER_HOUR, windowMin: 60 });
+  }
   const sessionId = randomUUID();
   const workdir = mkdtempSync(path.join(SESSIONS_DIR, `qbe-${sessionId}-`));
 
@@ -171,13 +200,19 @@ function runDocker(workdir, sessionId) {
 }
 
 function handleHealth(req, res) {
+  // F4: active session count + rate-limit-state
+  const activeRunSessions = runSessions.size;
+  const trackedIps = rateBuckets.size;
   json(res, 200, {
     service: 'qbe-runner',
-    version: '0.5.0-Hopper',
-    milestone: 'v1.0.0-Kemeny F1 (backend skeleton)',
+    version: '1.0.0-Kemeny',
+    milestone: 'v1.0.0-Kemeny F4 (production)',
     docker_image: DOCKER_IMAGE,
     port: PORT,
     bind: BIND,
+    rate_limit: `${RATE_LIMIT_PER_HOUR}/hour per IP`,
+    active_run_sessions: activeRunSessions,
+    tracked_ips: trackedIps,
   });
 }
 
@@ -214,7 +249,7 @@ function handleRun(req, res, sessionId) {
   const args = [
     'run', '--rm', '-d',
     '--network', 'host',
-    '--memory', '1g', '--cpus', '4.0',
+    '--memory', '2g',  // geen --cpus = max host-CPU
     '--name', containerName,
     '--user', 'qbe:qbe',
     '-v', `${workdir}:/work`,
