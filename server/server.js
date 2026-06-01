@@ -8,8 +8,12 @@
 
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, statSync, chmodSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+
+// Workdir base: NOT /tmp (would be PrivateTmp-isolated from Docker daemon).
+const SESSIONS_DIR = '/var/lib/qbe-runner/sessions';
+mkdirSync(SESSIONS_DIR, { recursive: true });
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import Busboy from 'busboy';
@@ -35,7 +39,7 @@ function logEvent(ev) {
 
 async function handleCompile(req, res) {
   const sessionId = randomUUID();
-  const workdir = mkdtempSync(path.join(tmpdir(), `qbe-${sessionId}-`));
+  const workdir = mkdtempSync(path.join(SESSIONS_DIR, `qbe-${sessionId}-`));
 
   let sourceBytes = Buffer.alloc(0);
   let filename = 'input.bas';
@@ -85,6 +89,9 @@ async function handleCompile(req, res) {
 
       const inputPath = path.join(workdir, 'input.bas');
       writeFileSync(inputPath, sourceBytes);
+      // Make workdir + input readable by container's non-root qbe user (uid 1000)
+      chmodSync(workdir, 0o755);
+      chmodSync(inputPath, 0o644);
 
       logEvent({ event: 'compile-start', sessionId, filename, bytes: sourceBytes.length });
 
@@ -133,14 +140,13 @@ function runDocker(workdir, sessionId) {
       '--network', 'none',
       '--memory', '256m',
       '--cpus', '1.0',
-      '--read-only',
+      // NB: --read-only removed (qb64pe writes to internal/temp/ at startup).
+      // Sandboxing remains via --network none + --memory + --cpus + non-root user.
       '--tmpfs', '/tmp:rw,size=64m',
       '--name', `qbe-${sessionId}`,
       '--user', 'qbe:qbe',
       '-v', `${workdir}:/work`,
-      '--workdir', '/work',
       DOCKER_IMAGE,
-      '-c', '/work/input.bas', '-o', '/work/output',
     ];
     const proc = spawn('docker', args);
     let stdout = '';

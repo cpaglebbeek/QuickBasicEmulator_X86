@@ -12,28 +12,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
     && rm -rf /var/lib/apt/lists/*
 
+RUN useradd -m -u 1000 builder
 WORKDIR /opt
-RUN git clone --depth 1 https://github.com/QB64-Phoenix-Edition/QB64pe.git qb64pe
+RUN git clone --depth 1 https://github.com/QB64-Phoenix-Edition/QB64pe.git qb64pe \
+    && chown -R builder:builder /opt/qb64pe
+USER builder
 WORKDIR /opt/qb64pe
 
-# Build QB64-PE compiler (console-only flavor, no GUI runtime needed for compile)
-RUN ./setup_lnx.sh quiet || true
+# Build QB64-PE compiler. setup_lnx.sh refuses root → use non-root builder.
+RUN ./setup_lnx.sh quiet
 RUN test -x ./qb64pe || (echo "QB64-PE build failed" && exit 1)
+USER root
 
 # Slim runtime image
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libssl3 libcurl4 libfreetype6 libfontconfig1 \
-    libgl1 libglu1-mesa libglew2.2 freeglut3 \
-    libxrandr2 libxinerama1 libxcursor1 libxi6 \
+    build-essential \
+    libssl-dev libcurl4-openssl-dev libfreetype-dev libfontconfig1-dev \
+    libgl1-mesa-dev libglu1-mesa-dev libglew-dev libglut-dev \
+    libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 1000 -s /bin/bash qbe \
     && mkdir -p /work && chown qbe:qbe /work
 
 COPY --from=build /opt/qb64pe /opt/qb64pe
 
+RUN chown -R qbe:qbe /opt/qb64pe
+
+COPY --chown=qbe:qbe entrypoint.sh /usr/local/bin/qbe-compile
+RUN chmod +x /usr/local/bin/qbe-compile
+
 USER qbe
 WORKDIR /work
-ENTRYPOINT ["/opt/qb64pe/qb64pe"]
-CMD ["--help"]
+ENTRYPOINT ["/usr/local/bin/qbe-compile"]
+CMD []

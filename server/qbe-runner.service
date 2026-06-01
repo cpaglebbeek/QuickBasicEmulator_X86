@@ -20,7 +20,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/log/qbe-runner /tmp
+ReadWritePaths=/var/log/qbe-runner /var/lib/qbe-runner
 StandardOutput=journal
 StandardError=journal
 
