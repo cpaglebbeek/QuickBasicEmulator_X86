@@ -1,0 +1,28 @@
+[Unit]
+Description=QuickBasicEmulator Native Compile-as-a-Service (qbe-runner)
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/qbe-runner
+ExecStart=/usr/bin/node /opt/qbe-runner/server.js
+Restart=on-failure
+RestartSec=5s
+User=root
+Environment=NODE_ENV=production
+Environment=QBE_RUNNER_PORT=4001
+Environment=QBE_RUNNER_BIND=127.0.0.1
+Environment=QBE_RUNNER_IMAGE=qbe-compiler:latest
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/qbe-runner /tmp
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

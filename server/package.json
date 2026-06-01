@@ -1,0 +1,16 @@
+{
+  "name": "qbe-runner",
+  "version": "0.5.0",
+  "description": "Native QB64-PE compile-as-a-service backend for QuickBasicEmulator v1.0.0-Kemeny",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "busboy": "^1.6.0"
+  },
+  "license": "AGPL-3.0-or-later"
+}
