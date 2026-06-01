@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev libcurl4-openssl-dev libfreetype-dev libfontconfig1-dev \
     libgl1-mesa-dev libglu1-mesa-dev libglew-dev libglut-dev \
     libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+    xvfb x11vnc websockify procps \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 1000 -s /bin/bash qbe \
     && mkdir -p /work && chown qbe:qbe /work

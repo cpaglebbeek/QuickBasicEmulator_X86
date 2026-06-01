@@ -8,7 +8,7 @@
 
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync, existsSync, statSync, chmodSync, mkdirSync, chownSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, statSync, chmodSync, mkdirSync, chownSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 // Workdir base: NOT /tmp (would be PrivateTmp-isolated from Docker daemon).
@@ -115,11 +115,11 @@ async function handleCompile(req, res) {
         stderr: result.stderr.slice(0, 8192),
         binSize,
         durationMs: result.ms,
-        next: hasBin ? `F2: spawn x11vnc-container with binary (not yet implemented)` : null,
+        runUrl: hasBin ? `/qbe-runner/api/run/${sessionId}` : null,
       });
 
-      // Cleanup after returning response (binary lives until next gc-cycle in F2)
-      setTimeout(() => rmSync(workdir, { recursive: true, force: true }), 60_000);
+      // Cleanup after 5min (F2 needs binary available for /api/run)
+      setTimeout(() => rmSync(workdir, { recursive: true, force: true }), 300_000);
     } catch (err) {
       logEvent({ event: 'compile-error', sessionId, error: String(err) });
       rmSync(workdir, { recursive: true, force: true });
@@ -181,10 +181,86 @@ function handleHealth(req, res) {
   });
 }
 
+// F2: per-session run state
+const runSessions = new Map(); // sessionId -> {containerName, wsPort, expiresAt}
+
+function findWorkdir(sessionId) {
+  const prefix = `qbe-${sessionId}-`;
+  const dirs = (existsSync(SESSIONS_DIR) ? readdirSync(SESSIONS_DIR) : []);
+  const match = dirs.find((d) => d.startsWith(prefix));
+  return match ? path.join(SESSIONS_DIR, match) : null;
+}
+
+function handleRun(req, res, sessionId) {
+  const workdir = findWorkdir(sessionId);
+  if (!workdir) return json(res, 404, { error: 'session not found or expired', sessionId });
+  const binPath = path.join(workdir, 'output');
+  if (!existsSync(binPath)) return json(res, 404, { error: 'binary missing', sessionId });
+
+  // Deterministic port from sessionId
+  let h = 0;
+  for (const c of sessionId) h = (h * 31 + c.charCodeAt(0)) | 0;
+  const wsPort = 6901 + (Math.abs(h) % 99);
+  const vncPort = wsPort - 1000;
+
+  const existing = runSessions.get(sessionId);
+  if (existing && existing.expiresAt > Date.now()) {
+    return json(res, 200, { sessionId, wsPort: existing.wsPort, expiresAt: existing.expiresAt, vncPath: `/qbe-vnc/${existing.wsPort}/websockify` });
+  }
+
+  const containerName = `qbe-run-${sessionId}`;
+  spawn('docker', ['rm', '-f', containerName]).on('error', () => {});
+
+  const args = [
+    'run', '--rm', '-d',
+    '--network', 'host',
+    '--memory', '1g', '--cpus', '4.0',
+    '--name', containerName,
+    '--user', 'qbe:qbe',
+    '-v', `${workdir}:/work`,
+    '-e', 'MODE=run',
+    '-e', `WS_PORT=${wsPort}`,
+    '-e', `VNC_PORT=${vncPort}`,
+    '-e', `DISPLAY_NUM=${wsPort - 6800}`,  // unieke display per sessie (101-199)
+    '-e', 'BINARY=/work/output',
+    DOCKER_IMAGE,
+  ];
+
+  const proc = spawn('docker', args);
+  let stderr = '';
+  proc.stderr.on('data', (b) => { stderr += b.toString(); });
+  proc.on('close', (code) => {
+    if (code !== 0) {
+      logEvent({ event: 'run-spawn-error', sessionId, code, stderr });
+      return json(res, 500, { error: 'spawn failed', stderr, exitCode: code });
+    }
+    const expiresAt = Date.now() + 300_000;
+    runSessions.set(sessionId, { containerName, wsPort, expiresAt });
+    setTimeout(() => {
+      spawn('docker', ['kill', containerName]).on('error', () => {});
+      runSessions.delete(sessionId);
+    }, 300_000);
+    logEvent({ event: 'run-started', sessionId, wsPort, containerName });
+    json(res, 200, { sessionId, wsPort, expiresAt, vncPath: `/qbe-vnc/${wsPort}/websockify` });
+  });
+}
+
+function handleStop(req, res, sessionId) {
+  const s = runSessions.get(sessionId);
+  if (!s) return json(res, 404, { error: 'no running session', sessionId });
+  spawn('docker', ['kill', s.containerName]).on('error', () => {});
+  runSessions.delete(sessionId);
+  json(res, 200, { ok: true, stopped: sessionId });
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/api/health') return handleHealth(req, res);
   if (req.method === 'POST' && req.url === '/api/compile') return handleCompile(req, res);
-  json(res, 404, { error: 'not found', endpoints: ['GET /api/health', 'POST /api/compile'] });
+  let m = req.url.match(/^\/api\/run\/([0-9a-f-]+)$/);
+  if (m && req.method === 'POST') return handleRun(req, res, m[1]);
+  m = req.url.match(/^\/api\/stop\/([0-9a-f-]+)$/);
+  if (m && req.method === 'POST') return handleStop(req, res, m[1]);
+  json(res, 404, { error: 'not found', endpoints: ['GET /api/health', 'POST /api/compile', 'POST /api/run/<sessionId>', 'POST /api/stop/<sessionId>'] });
 });
 
 server.listen(PORT, BIND, () => {
