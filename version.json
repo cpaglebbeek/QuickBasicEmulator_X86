@@ -1,12 +1,20 @@
 {
-  "version": "0.3.0",
-  "codename": "Chen",
+  "version": "1.0.0",
+  "codename": "Kemeny",
   "released": "2026-06-01",
-  "stable": false,
-  "type": "x86-vendored-qb64pe-skeleton",
-  "milestone": "QB64-PE fork as git submodule + wrapper CLI skeleton (compile not yet tested)",
+  "stable": true,
+  "type": "native-compiler-as-a-service-live",
+  "milestone": "F1 compile + F2 Xvfb/x11vnc/noVNC stream + F3 frontend + F4 production (UX/rate-limit/samples) + F6 security hardening (gVisor) LIVE op horsecloud55.ddns.net/basic/native/. K2026.BAS compileert + draait native met mouse/keyboard round-trip in browser. F5 sound = post-MVP.",
+  "live_demo": "https://horsecloud55.ddns.net/basic/native/",
+  "backend": "qbe-runner.service :4001 op HC55 (qbe-compiler:latest Docker image ~1.1GB, QB64-PE compiled from source)",
+  "security": "gVisor runsc runtime voor compile-containers + --cap-drop=ALL + --security-opt=no-new-privileges + rate-limit 20/hour per IP + dangerous-keyword filter + audit-log met source-sha256",
   "vendored": {
     "QB64-Phoenix-Edition/QB64pe": "722b7d99a75d2c0f8965a91c18c40648ac2643e7"
   },
-  "next_steps": "Run ./vendor/qb64pe/setup_osx.command voor eerste build; daarna cmake -B build . && cmake --build build"
+  "history": {
+    "v0.5.0-Hopper F1": "0e3732c (native compile-as-a-service werkt) + 33d37e5 (qbe-runner backend + Docker image) + f0afe61 (backend skeleton)",
+    "v0.5.0-Hopper F2": "08ec8b7 (Xvfb + x11vnc + noVNC + nginx ws-proxy + mouse/keyboard round-trip)",
+    "v1.0.0-Kemeny F4": "6d5f0ed (UX error-handling + rate-limit + sample-dropdown + auto-stop beforeunload)",
+    "v1.0.0-Kemeny F6": "fff4460 (gVisor + cap-drop + audit-log)"
+  }
 }
