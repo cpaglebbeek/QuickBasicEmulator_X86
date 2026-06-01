@@ -1,23 +1,44 @@
 # QuickBasicEmulator_X86
 
-Native runtime voor Windows/Linux/macOS. Compileert `.bas` (GW-BASIC, QBasic, QuickBASIC 4.5) naar native binaries.
+Native runtime voor Windows/Linux/macOS. Compileert `.bas` (GW-BASIC, QBasic, QuickBASIC 4.5) naar native binaries via vendored QB64-PE.
 
-> ⚠️ **v0.0.1-Gates — Skeleton.** Geen QB64-PE-fork in deze versie. Fork-import gepland voor v0.3.0-Chen. Zie [ROADMAP](https://github.com/cpaglebbeek/Meta_QuickBasicEmulator/blob/main/ROADMAP.md).
+> 🟡 **v0.3.0-Chen — Submodule + wrapper skeleton.** QB64-PE fork toegevoegd als git submodule (commit `722b7d99`, MIT). Wrapper CLI gebouwd. **Eerste setup vereist** — zie hieronder.
 
 ## Tech
 
-- **C++17** + **CMake**
-- Vanaf v0.3.0: vendored fork van [QB64-Phoenix-Edition/QB64pe](https://github.com/QB64-Phoenix-Edition/QB64pe) (MIT → AGPL-3.0 doorgifte)
-- Dialect-flag: `--dialect=gw|qbasic|qb45`
+- **C++17** + **CMake** (wrapper CLI)
+- **QB64-PE** (MIT → AGPL-3.0 doorgifte) als git submodule in `vendor/qb64pe/`
+- Dialect-flag: `--dialect=gw|qbasic|qb45` (v0.3.0: alleen geaccepteerd, v0.3.1+: dialect-rewrite)
 - Consumeert `QuickBasicEmulator_Core` dialect-spec via vendored JSON
 
-## Build
+## Build (eerste keer)
 
 ```bash
-mkdir build && cd build
-cmake ..
-cmake --build .
+# 1. Submodule ophalen (als nog niet gedaan)
+git submodule update --init --recursive
+
+# 2. QB64-PE setup (macOS) — downloadt benodigde toolchain (~paar minuten)
+cd vendor/qb64pe
+./setup_osx.command
+
+# 3. Build wrapper
+cd ../..
+cmake -B build -S .
+cmake --build build
+
+# 4. Run
+./build/qbe_x86 --dialect=qb45 -o hello hello.bas
 ```
+
+Voor Linux: `setup_lnx.sh`. Voor Windows: `setup_win.cmd` of `setup_mingw.cmd`.
+
+## Status v0.3.0-Chen
+
+- ✅ Submodule QB64-PE @ `722b7d99` (2026-05-31)
+- ✅ Wrapper CLI compileert (parse args, exec QB64-PE)
+- ✅ NOTICE + LEGAL met license-doorgifte (MIT → AGPL-3.0)
+- ⚠ QB64-PE setup_osx.command nog niet uitgevoerd in deze sessie — wacht op user-test
+- ⚠ K2026C end-to-end-test nog niet gedraaid op X86
 
 ## Project + ecosystem
 

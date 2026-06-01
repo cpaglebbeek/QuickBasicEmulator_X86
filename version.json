@@ -1,7 +1,12 @@
 {
-  "version": "0.0.1",
-  "codename": "Gates",
-  "released": "2026-05-31",
+  "version": "0.3.0",
+  "codename": "Chen",
+  "released": "2026-06-01",
   "stable": false,
-  "type": "skeleton"
+  "type": "x86-vendored-qb64pe-skeleton",
+  "milestone": "QB64-PE fork as git submodule + wrapper CLI skeleton (compile not yet tested)",
+  "vendored": {
+    "QB64-Phoenix-Edition/QB64pe": "722b7d99a75d2c0f8965a91c18c40648ac2643e7"
+  },
+  "next_steps": "Run ./vendor/qb64pe/setup_osx.command voor eerste build; daarna cmake -B build . && cmake --build build"
 }

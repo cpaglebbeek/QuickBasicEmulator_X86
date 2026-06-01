@@ -1,0 +1,3 @@
+[submodule "vendor/qb64pe"]
+	path = vendor/qb64pe
+	url = https://github.com/QB64-Phoenix-Edition/QB64pe.git
