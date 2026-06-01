@@ -4,4 +4,4 @@
 set -e
 cd /opt/qb64pe
 # -x: compile with console progress (no GUI window, no tiny-file-dialogs needs)
-exec ./qb64pe -p -x /work/input.bas -o /work/output 2>&1
+exec ./qb64pe -x /work/input.bas -o /work/output 2>&1

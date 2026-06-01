@@ -8,7 +8,7 @@
 
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync, existsSync, statSync, chmodSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, statSync, chmodSync, mkdirSync, chownSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 // Workdir base: NOT /tmp (would be PrivateTmp-isolated from Docker daemon).
@@ -89,7 +89,10 @@ async function handleCompile(req, res) {
 
       const inputPath = path.join(workdir, 'input.bas');
       writeFileSync(inputPath, sourceBytes);
-      // Make workdir + input readable by container's non-root qbe user (uid 1000)
+      // Container's qbe user (uid 1000) needs WRITE access — qb64pe creates temp
+      // files in source-dir during compile. chown the whole workdir to 1000:1000.
+      chownSync(workdir, 1000, 1000);
+      chownSync(inputPath, 1000, 1000);
       chmodSync(workdir, 0o755);
       chmodSync(inputPath, 0o644);
 
