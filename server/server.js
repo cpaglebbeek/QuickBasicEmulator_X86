@@ -20,7 +20,8 @@ import { tmpdir } from 'node:os';
 const SESSIONS_DIR = '/var/lib/qbe-runner/sessions';
 mkdirSync(SESSIONS_DIR, { recursive: true });
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import Busboy from 'busboy';
 
 const PORT = Number(process.env.QBE_RUNNER_PORT ?? 4001);
@@ -29,6 +30,13 @@ const COMPILE_TIMEOUT_MS = 60_000;
 const MAX_SOURCE_BYTES = 1_048_576; // 1 MiB
 const DOCKER_IMAGE = process.env.QBE_RUNNER_IMAGE ?? 'qbe-compiler:latest';
 const DOCKER_TIMEOUT_S = 90;
+
+// F6: security hardening
+const DOCKER_RUNTIME = process.env.QBE_RUNNER_RUNTIME ?? 'runsc';  // gVisor by default
+const AUDIT_LOG = '/var/log/qbe-runner/audit.log';
+function audit(event) {
+  try { appendFileSync(AUDIT_LOG, JSON.stringify({ ts: new Date().toISOString(), ...event }) + '\n'); } catch {}
+}
 
 // F4: extended dangerous-keywords list (was: SHELL|KILL|POKE|OUT)
 const DANGEROUS_KEYWORDS_RE = /\b(SHELL|KILL|POKE|OUT|SYSTEM|CHAIN|FILES|RUN\s+["']|_OS|_OPENCLIENT|_CONNECT|_HTTPS)\b/i;
@@ -125,7 +133,9 @@ async function handleCompile(req, res) {
       chmodSync(workdir, 0o755);
       chmodSync(inputPath, 0o644);
 
-      logEvent({ event: 'compile-start', sessionId, filename, bytes: sourceBytes.length });
+      const sourceHash = createHash('sha256').update(sourceBytes).digest('hex').slice(0, 16);
+      logEvent({ event: 'compile-start', sessionId, filename, bytes: sourceBytes.length, sourceHash });
+      audit({ event: 'compile', sessionId, ip, filename, bytes: sourceBytes.length, sourceHash });
 
       const result = await runDocker(workdir, sessionId);
 
@@ -169,11 +179,12 @@ function runDocker(workdir, sessionId) {
     const startedAt = Date.now();
     const args = [
       'run', '--rm',
+      ...(DOCKER_RUNTIME ? ['--runtime', DOCKER_RUNTIME] : []),
       '--network', 'none',
       '--memory', '256m',
       '--cpus', '1.0',
-      // NB: --read-only removed (qb64pe writes to internal/temp/ at startup).
-      // Sandboxing remains via --network none + --memory + --cpus + non-root user.
+      '--cap-drop', 'ALL',
+      '--security-opt', 'no-new-privileges',
       '--tmpfs', '/tmp:rw,size=64m',
       '--name', `qbe-${sessionId}`,
       '--user', 'qbe:qbe',
@@ -206,13 +217,20 @@ function handleHealth(req, res) {
   json(res, 200, {
     service: 'qbe-runner',
     version: '1.0.0-Kemeny',
-    milestone: 'v1.0.0-Kemeny F4 (production)',
+    milestone: 'v1.0.0-Kemeny F6 (security hardening)',
     docker_image: DOCKER_IMAGE,
     port: PORT,
     bind: BIND,
     rate_limit: `${RATE_LIMIT_PER_HOUR}/hour per IP`,
     active_run_sessions: activeRunSessions,
     tracked_ips: trackedIps,
+    sandbox: {
+      compile_runtime: DOCKER_RUNTIME || 'runc',
+      run_runtime: 'runc (host-network needed for VNC)',
+      cap_drop: 'ALL',
+      no_new_privileges: true,
+    },
+    audit_log: AUDIT_LOG,
   });
 }
 
@@ -246,9 +264,14 @@ function handleRun(req, res, sessionId) {
   const containerName = `qbe-run-${sessionId}`;
   spawn('docker', ['rm', '-f', containerName]).on('error', () => {});
 
+  audit({ event: 'run', sessionId, wsPort, containerName });
   const args = [
     'run', '--rm', '-d',
+    // NB: gVisor (runsc) incompat with --network=host. Run-containers gebruiken
+    // standaard runc + cap-drop + no-new-privileges voor defense-in-depth.
     '--network', 'host',
+    '--cap-drop', 'ALL',
+    '--security-opt', 'no-new-privileges',
     '--memory', '2g',  // geen --cpus = max host-CPU
     '--name', containerName,
     '--user', 'qbe:qbe',
@@ -283,6 +306,7 @@ function handleRun(req, res, sessionId) {
 function handleStop(req, res, sessionId) {
   const s = runSessions.get(sessionId);
   if (!s) return json(res, 404, { error: 'no running session', sessionId });
+  audit({ event: 'stop', sessionId, containerName: s.containerName });
   spawn('docker', ['kill', s.containerName]).on('error', () => {});
   runSessions.delete(sessionId);
   json(res, 200, { ok: true, stopped: sessionId });
